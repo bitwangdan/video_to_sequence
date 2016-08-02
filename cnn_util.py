@@ -4,13 +4,13 @@ import cv2
 import numpy as np
 import skimage
 
-deploy = '/home/taeksoo/Package/caffe/models/bvlc_reference_caffenet/deploy.prototxt'
-model = '/home/taeksoo/Package/caffe/models/bvlc_reference_caffenet/bvlc_reference_caffenet.caffemodel'
-mean = '/home/taeksoo/Package/caffe/python/caffe/imagenet/ilsvrc_2012_mean.npy'
+deploy = '/home/yusheng/Workspace/caffe/models/VGG_ILSVRC_16_layers/VGG_ILSVRC_16_layers_deploy.prototxt'
+model = '/home/yusheng/Workspace/caffe/models/VGG_ILSVRC_16_layers/VGG_ILSVRC_16_layers.caffemodel'
+mean = '/home/yusheng/Workspace/caffe/python/caffe/imagenet/ilsvrc_2012_mean.npy'
 
 class CNN(object):
 
-    def __init__(self, deploy=deploy, model=model, mean=mean, batch_size=10, width=227, height=227):
+    def __init__(self, deploy=deploy, model=model, mean=mean, batch_size=10, width=224, height=224):
 
         self.deploy = deploy
         self.model = model

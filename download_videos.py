@@ -60,8 +60,8 @@ def download_and_process_video(save_path, row):
     out.release()
 
 def main():
-    video_data_path='./data/video_corpus.csv'
-    video_save_path = '/media/storage3/Study/data/youtube_videos'
+    video_data_path='./video_corpus.csv'
+    video_save_path = './youtube_videos'
 
     video_data = pd.read_csv(video_data_path, sep=',')
     video_data = video_data[video_data['Language'] == 'English']

@@ -39,10 +39,10 @@ def preprocess_frame(image, target_height=224, target_width=224):
 
 def main():
     num_frames = 80
-    vgg_model = '/home/taeksoo/Package/caffe/models/vgg/VGG_ILSVRC_19_layers.caffemodel'
-    vgg_deploy = '/home/taeksoo/Package/caffe/models/vgg/VGG_ILSVRC_19_layers_deploy.prototxt'
-    video_path = '/media/storage3/Study/data/youtube_videos'
-    video_save_path = '/media/storage3/Study/data/youtube_feats'
+    vgg_model = '/home/yusheng/Workspace/caffe/models/VGG_ILSVRC_16_layers/VGG_ILSVRC_16_layers.caffemodel'
+    vgg_deploy = '/home/yusheng/Workspace/caffe/models/VGG_ILSVRC_16_layers/VGG_ILSVRC_16_layers_deploy.prototxt'
+    video_path = './youtube_videos'
+    video_save_path = './youtube_feats'
     videos = os.listdir(video_path)
     videos = filter(lambda x: x.endswith('avi'), videos)
 
@@ -51,7 +51,7 @@ def main():
     for video in videos:
         print video
 
-        if os.path.exists( os.path.join(video_save_path, video) ):
+        if os.path.exists( os.path.join(video_save_path, video+'.npy') ):
             print "Already processed ... "
             continue
 

@@ -7,7 +7,7 @@ import ipdb
 
 import cv2
 
-from tensorflow.models.rnn import rnn_cell
+from tensorflow.python.ops import rnn_cell
 from keras.preprocessing import sequence
 
 class Video_Caption_Generator():
@@ -18,7 +18,7 @@ class Video_Caption_Generator():
         self.batch_size = batch_size
         self.n_lstm_steps = n_lstm_steps
 
-        with tf.device("/cpu:0"):
+        with tf.device("/gpu:3"):
             self.Wemb = tf.Variable(tf.random_uniform([n_words, dim_hidden], -0.1, 0.1), name='Wemb')
 
         self.lstm1 = rnn_cell.BasicLSTMCell(dim_hidden)
@@ -70,7 +70,7 @@ class Video_Caption_Generator():
             if i == 0:
                 current_embed = tf.zeros([self.batch_size, self.dim_hidden])
             else:
-                with tf.device("/cpu:0"):
+                with tf.device("/gpu:3"):
                     current_embed = tf.nn.embedding_lookup(self.Wemb, caption[:,i-1])
 
             tf.get_variable_scope().reuse_variables()
@@ -142,7 +142,7 @@ class Video_Caption_Generator():
             generated_words.append(max_prob_index)
             probs.append(logit_words)
 
-            with tf.device("/cpu:0"):
+            with tf.device("/gpu:3"):
                 current_embed = tf.nn.embedding_lookup(self.Wemb, max_prob_index)
                 current_embed = tf.expand_dims(current_embed, 0)
 
@@ -152,11 +152,11 @@ class Video_Caption_Generator():
 
 
 ############### Global Parameters ###############
-video_path = '/media/storage3/Study/data/youtube_videos'
-video_data_path='./data/video_corpus.csv'
-video_feat_path = '/media/storage3/Study/data/youtube_feats'
+video_path = './youtube_videos'
+video_data_path='./video_corpus.csv'
+video_feat_path = './youtube_feats'
 
-vgg16_path = '/home/taeksoo/Package/tensorflow_vgg16/vgg16.tfmodel'
+vgg16_path = './tfmodel/vgg16.tfmodel'
 
 model_path = './models/'
 ############## Train Parameters #################
@@ -332,3 +332,5 @@ def test(model_path='models/model-900', video_feat_path=video_feat_path):
         ipdb.set_trace()
 
     ipdb.set_trace()
+
+test()
