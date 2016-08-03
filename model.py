@@ -158,7 +158,7 @@ video_feat_path = './youtube_feats'
 
 vgg16_path = './tfmodel/vgg16.tfmodel'
 
-model_path = './models/'
+model_path = './models2/'
 ############## Train Parameters #################
 dim_image = 4096
 dim_hidden= 256
@@ -265,7 +265,7 @@ def train():
                 current_video_masks[ind][:len(current_feats_vals[ind])] = 1
 
             current_captions = current_batch['Description'].values
-            current_caption_ind = map(lambda cap: [wordtoix[word] for word in cap.lower().split(' ')[:-1] if word in wordtoix], current_captions)
+            current_caption_ind = map(lambda cap: [wordtoix[word] for word in cap.lower().split(' ') if word in wordtoix], current_captions)
 
             current_caption_matrix = sequence.pad_sequences(current_caption_ind, padding='post', maxlen=n_frame_step-1)
             current_caption_matrix = np.hstack( [current_caption_matrix, np.zeros( [len(current_caption_matrix),1]) ] ).astype(int)
@@ -316,9 +316,15 @@ def test(model_path='models/model-900', video_feat_path=video_feat_path):
 
     for video_feat_path in test_videos:
         print video_feat_path
-        video_feat = np.load(video_feat_path)[None,...]
-        video_mask = np.ones((video_feat.shape[0], video_feat.shape[1]))
+        if video_feat.shape[1] == n_frame_step:
+            video_mask = np.ones((video_feat.shape[0], video_feat.shape[1]))
 
+        else:
+            shape_templete = np.zeros(shape=(1, n_frame_step, 4096), dtype=float )
+            shape_templete[:video_feat.shape[0],:video_feat.shape[1],:video_feat.shape[2]] = video_feat
+            video_feat = shape_templete
+            video_mask = np.ones((video_feat.shape[0], n_frame_step))
+        
         generated_word_index = sess.run(caption_tf, feed_dict={video_tf:video_feat, video_mask_tf:video_mask})
         probs_val = sess.run(probs_tf, feed_dict={video_tf:video_feat})
         embed_val = sess.run(last_embed_tf, feed_dict={video_tf:video_feat})
@@ -333,4 +339,4 @@ def test(model_path='models/model-900', video_feat_path=video_feat_path):
 
     ipdb.set_trace()
 
-test()
+train()
