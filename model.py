@@ -158,7 +158,7 @@ video_feat_path = './youtube_feats'
 
 vgg16_path = './tfmodel/vgg16.tfmodel'
 
-model_path = './models2/'
+model_path = './models3/'
 ############## Train Parameters #################
 dim_image = 4096
 dim_hidden= 256
@@ -265,6 +265,8 @@ def train():
                 current_video_masks[ind][:len(current_feats_vals[ind])] = 1
 
             current_captions = current_batch['Description'].values
+            current_captions = map(lambda x: x.replace('.', ''), current_captions)
+            current_captions = map(lambda x: x.replace(',', ''), current_captions)
             current_caption_ind = map(lambda cap: [wordtoix[word] for word in cap.lower().split(' ') if word in wordtoix], current_captions)
 
             current_caption_matrix = sequence.pad_sequences(current_caption_ind, padding='post', maxlen=n_frame_step-1)
