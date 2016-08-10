@@ -4,8 +4,7 @@ import pandas as pd
 from pandas import Series, DataFrame
 import numpy as np
 import os
-import ipdb
-
+import sys
 import cv2
 
 from tensorflow.python.ops import rnn_cell
@@ -160,13 +159,17 @@ video_feat_path = './youtube_feats'
 train_video_feat_path = '/home2/dataset/MSVD/MSVD_train_feats'
 val_video_feat_path = '/home2/dataset/MSVD/MSVD_val_feats'
 
+
+train_long_videos_path = '/home2/dataset/MSVD/long_train.txt'
+train_short_videos_path = '/home2/dataset/MSVD/short_train.txt'
+
 train_sents_gt_path = '/home2/dataset/MSVD/train_sents_gt.txt'
 test_sents_gt_path = '/home2/dataset/MSVD/test_sents_gt.txt'
 val_sents_gt_path = '/home2/dataset/MSVD/val_sents_gt.txt'
 
 vgg16_path = './tfmodel/vgg16.tfmodel'
 
-model_path = './MSVD_models1/'
+model_path = './MSVD_short_models1/'
 ############## Train Parameters #################
 dim_image = 4096
 dim_hidden= 256
@@ -210,6 +213,30 @@ def MSVD_get_video_data( sents_gt_path, video_feat_path ):
     
     return video_data
 
+def MSVD_get_ls_video_data( sents_gt_path, video_feat_path, ls_path ):
+    video_path = []
+    description = []
+    videoID = []
+    ls_videoIDs = []
+    with open(ls_path) as file :
+        for line in file :
+            ls_videoIDs.append( line )
+        
+    with open(train_sents_gt_path) as file :
+        for line in file :
+            id_sent = line.strip().split('\t')
+            
+            for ls_videoID in ls_videoIDs: 
+                if ls_videoID.split('.')[0] == id_sent[0]:  
+                    description.append( ''.join(id_sent[-1:]) ) #list to str
+                    videoID.append( id_sent[0] )
+                    video_path.append( os.path.join( video_feat_path, id_sent[0]+'.avi.npy' ) )    
+                        
+    video_data = DataFrame({'VideoID':videoID, 'Description':description, 'video_path':video_path})
+    
+    return video_data
+
+
 def preProBuildWordVocab(sentence_iterator, word_count_threshold=5): # borrowed this function from NeuralTalk
     print 'preprocessing word counts and creating vocab based on word count threshold %d' % (word_count_threshold, )
     word_counts = {}
@@ -239,20 +266,17 @@ def preProBuildWordVocab(sentence_iterator, word_count_threshold=5): # borrowed 
     bias_init_vector -= np.max(bias_init_vector) # shift to nice numeric range
     return wordtoix, ixtoword, bias_init_vector
 
-def train():
-    # data w/o split
-    #train_data, _ = get_video_data(video_data_path, video_feat_path, train_ratio=0.9)
-    #print(train_data)
-    #print(type(train_data))
-    
-    train_data = MSVD_get_video_data( train_sents_gt_path, train_video_feat_path )
+def train():    
+    # short videos
+    train_data = MSVD_get_ls_video_data( train_sents_gt_path, train_video_feat_path, train_short_videos_path )
 
-    captions = train_data['Description'].values
+    msvd_vocab_data = MSVD_get_video_data( train_sents_gt_path, train_video_feat_path )
+    captions = msvd_vocab_data['Description'].values
     captions = map(lambda x: x.replace('.', ''), captions)
     captions = map(lambda x: x.replace(',', ''), captions)    
     wordtoix, ixtoword, bias_init_vector = preProBuildWordVocab(captions, word_count_threshold=10)
-    np.save('./data/MSVD/ixtoword', ixtoword)
-
+    
+    
     model = Video_Caption_Generator(
             dim_image=dim_image,
             n_words=len(wordtoix),
@@ -324,50 +348,5 @@ def train():
         if np.mod(epoch, 100) == 0:
             print "Epoch ", epoch, " is done. Saving the model ..."
             saver.save(sess, os.path.join(model_path, 'model'), global_step=epoch)
-
-def test(model_path='models/model-900', video_feat_path=video_feat_path):
-
-    train_data, test_data = get_video_data(video_data_path, video_feat_path, train_ratio=0.9)
-    test_videos = test_data['video_path'].unique()
-    ixtoword = pd.Series(np.load('./data/ixtoword.npy').tolist())
-
-    model = Video_Caption_Generator(
-            dim_image=dim_image,
-            n_words=len(ixtoword),
-            dim_hidden=dim_hidden,
-            batch_size=batch_size,
-            n_lstm_steps=n_frame_step,
-            bias_init_vector=None)
-
-    video_tf, video_mask_tf, caption_tf, probs_tf, last_embed_tf = model.build_generator()
-    sess = tf.InteractiveSession()
-
-    saver = tf.train.Saver()
-    saver.restore(sess, model_path)
-
-    for video_feat_path in test_videos:
-        print video_feat_path
-        if video_feat.shape[1] == n_frame_step:
-            video_mask = np.ones((video_feat.shape[0], video_feat.shape[1]))
-
-        else:
-            shape_templete = np.zeros(shape=(1, n_frame_step, 4096), dtype=float )
-            shape_templete[:video_feat.shape[0],:video_feat.shape[1],:video_feat.shape[2]] = video_feat
-            video_feat = shape_templete
-            video_mask = np.ones((video_feat.shape[0], n_frame_step))
-        
-        generated_word_index = sess.run(caption_tf, feed_dict={video_tf:video_feat, video_mask_tf:video_mask})
-        probs_val = sess.run(probs_tf, feed_dict={video_tf:video_feat})
-        embed_val = sess.run(last_embed_tf, feed_dict={video_tf:video_feat})
-        generated_words = ixtoword[generated_word_index]
-
-        punctuation = np.argmax(np.array(generated_words) == '.')+1
-        generated_words = generated_words[:punctuation]
-
-        generated_sentence = ' '.join(generated_words)
-        print generated_sentence
-        ipdb.set_trace()
-
-    ipdb.set_trace()
 
 train()
