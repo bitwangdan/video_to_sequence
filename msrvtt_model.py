@@ -4,26 +4,37 @@ import pandas as pd
 from pandas import Series, DataFrame
 import numpy as np
 import os
+import ipdb
 import sys
+
 import cv2
 
 from tensorflow.python.ops import rnn_cell
 from keras.preprocessing import sequence
 
 class Video_Caption_Generator():
-    def __init__(self, dim_image, n_words, dim_hidden, batch_size, n_lstm_steps, bias_init_vector=None):
+    def __init__(self, dim_image, n_words, dim_hidden, batch_size, n_lstm_steps, drop_out_rate, bias_init_vector=None):
         self.dim_image = dim_image
         self.n_words = n_words
         self.dim_hidden = dim_hidden
         self.batch_size = batch_size
         self.n_lstm_steps = n_lstm_steps
+        self.drop_out_rate = drop_out_rate
+
 
         with tf.device("/gpu:2"):
             self.Wemb = tf.Variable(tf.random_uniform([n_words, dim_hidden], -0.1, 0.1), name='Wemb')
 
-        self.lstm1 = rnn_cell.BasicLSTMCell(dim_hidden)
-        self.lstm2 = rnn_cell.BasicLSTMCell(dim_hidden)
-
+#         self.lstm1 = rnn_cell.BasicLSTMCell(dim_hidden)
+#         self.lstm2 = rnn_cell.BasicLSTMCell(dim_hidden)
+        
+        self.lstm1 = rnn_cell.LSTMCell(self.dim_hidden,self.dim_hidden,use_peepholes = True)
+        self.lstm1_dropout = rnn_cell.DropoutWrapper(self.lstm1,output_keep_prob=1 - self.drop_out_rate)
+        self.lstm2 = rnn_cell.LSTMCell(self.dim_hidden,self.dim_hidden,use_peepholes = True)
+        self.lstm2_dropout = rnn_cell.DropoutWrapper(self.lstm2,output_keep_prob=1 - self.drop_out_rate)
+        
+        
+        # W is Weight, b is Bias 
         self.encode_image_W = tf.Variable( tf.random_uniform([dim_image, dim_hidden], -0.1, 0.1), name='encode_image_W')
         self.encode_image_b = tf.Variable( tf.zeros([dim_hidden]), name='encode_image_b')
 
@@ -55,13 +66,15 @@ class Video_Caption_Generator():
         for i in range(self.n_lstm_steps): ## Phase 1 => only read frames
             if i > 0:
                 tf.get_variable_scope().reuse_variables()
-
+ 
             with tf.variable_scope("LSTM1"):
-                output1, state1 = self.lstm1( image_emb[:,i,:], state1 )
+                #output1, state1 = self.lstm1( image_emb[:,i,:], state1 )
+                output1, state1 = self.lstm1_dropout( image_emb[:,i,:], state1 )
 
             with tf.variable_scope("LSTM2"):
-                output2, state2 = self.lstm2( tf.concat(1,[padding, output1]), state2 )
-
+                #output2, state2 = self.lstm2( tf.concat(1,[padding,output1]), state2 )
+                output2, state2 = self.lstm2_dropout( tf.concat(1,[padding,output1]), state2 )
+   
         # Each video might have different length. Need to mask those.
         # But how? Padding with 0 would be enough?
         # Therefore... TODO: for those short videos, keep the last LSTM hidden and output til the end.
@@ -75,11 +88,13 @@ class Video_Caption_Generator():
 
             tf.get_variable_scope().reuse_variables()
             with tf.variable_scope("LSTM1"):
-                output1, state1 = self.lstm1( padding, state1 )
-
+                #output1, state1 = self.lstm1( padding, state1 )
+                output1, state1 = self.lstm1_dropout( padding, state1 )
+                
             with tf.variable_scope("LSTM2"):
-                output2, state2 = self.lstm2( tf.concat(1,[current_embed, output1]), state2 )
-
+                #output2, state2 = self.lstm2( tf.concat(1,[current_embed,output1]), state2 )
+                output2, state2 = self.lstm2_dropout( tf.concat(1,[current_embed,output1]), state2 )
+ 
             labels = tf.expand_dims(caption[:,i], 1)
             indices = tf.expand_dims(tf.range(0, self.batch_size, 1), 1)
             concated = tf.concat(1, [indices, labels])
@@ -156,21 +171,13 @@ video_path = './youtube_videos'
 video_data_path='./video_corpus.csv'
 video_feat_path = './youtube_feats'
 
-train_video_feat_path = '/home2/dataset/MSVD/MSVD_train_feats'
-val_video_feat_path = '/home2/dataset/MSVD/MSVD_val_feats'
+train_val_video_feat_path = '/home2/dataset/MSR-VTT/train_val_feats'
 
-
-train_long_videos_path = '/home2/dataset/MSVD/long_train.txt'
-train_short_videos_path = '/home2/dataset/MSVD/short_train.txt'
-
-train_sents_gt_path = '/home2/dataset/MSVD/train_sents_gt.txt'
-test_sents_gt_path = '/home2/dataset/MSVD/test_sents_gt.txt'
-val_sents_gt_path = '/home2/dataset/MSVD/val_sents_gt.txt'
+train_val_sents_gt_path = '/home2/dataset/MSR-VTT/train_val_sents_gt.txt'
 
 vgg16_path = './tfmodel/vgg16.tfmodel'
 
-#model_path = './MSVD_short_models1/'
-model_path = './MSVD_long_models1/'
+model_path = './MSRVTT_models3/'
 ############## Train Parameters #################
 dim_image = 4096
 dim_hidden= 256
@@ -199,44 +206,23 @@ def get_video_data(video_data_path, video_feat_path, train_ratio=0.9):
 
     return train_data, test_data
 
-def MSVD_get_video_data( sents_gt_path, video_feat_path ):
+def MSRVTT_get_video_data( sents_gt_path, video_feat_path, only_train_data=False ):
     video_path = []
     description = []
     videoID = []
     with open(sents_gt_path) as file :
         for line in file :
             id_sent = line.strip().split('\t')
-            description.append( ''.join(id_sent[-1:]) ) #list to str
-            videoID.append( id_sent[0] )
-            video_path.append( os.path.join( video_feat_path, id_sent[0]+'.avi.npy' ) )    
+            id_num = int(id_sent[0].split('vid')[1])
+            if only_train_data == False or id_num < 6513 :  
+                description.append( ''.join(id_sent[-1:]) ) #list to str
+                videoID.append( id_sent[0] )
+                video_feat_name = id_sent[0].replace('vid','video')
+                video_path.append( os.path.join( video_feat_path, video_feat_name+'.mp4.npy' ) )    
                         
     video_data = DataFrame({'VideoID':videoID, 'Description':description, 'video_path':video_path})
     
     return video_data
-
-def MSVD_get_ls_video_data( sents_gt_path, video_feat_path, ls_path ):
-    video_path = []
-    description = []
-    videoID = []
-    ls_videoIDs = []
-    with open(ls_path) as file :
-        for line in file :
-            ls_videoIDs.append( line )
-        
-    with open(sents_gt_path) as file :
-        for line in file :
-            id_sent = line.strip().split('\t')
-            
-            for ls_videoID in ls_videoIDs: 
-                if ls_videoID.split('.')[0] == id_sent[0]:  
-                    description.append( ''.join(id_sent[-1:]) ) #list to str
-                    videoID.append( id_sent[0] )
-                    video_path.append( os.path.join( video_feat_path, id_sent[0]+'.avi.npy' ) )    
-                        
-    video_data = DataFrame({'VideoID':videoID, 'Description':description, 'video_path':video_path})
-    
-    return video_data
-
 
 def preProBuildWordVocab(sentence_iterator, word_count_threshold=5): # borrowed this function from NeuralTalk
     print 'preprocessing word counts and creating vocab based on word count threshold %d' % (word_count_threshold, )
@@ -267,26 +253,28 @@ def preProBuildWordVocab(sentence_iterator, word_count_threshold=5): # borrowed 
     bias_init_vector -= np.max(bias_init_vector) # shift to nice numeric range
     return wordtoix, ixtoword, bias_init_vector
 
-def train():    
-    # short videos
-    #train_data = MSVD_get_ls_video_data( train_sents_gt_path, train_video_feat_path, train_short_videos_path )
-
-    # long videos
-    train_data = MSVD_get_ls_video_data( train_sents_gt_path, train_video_feat_path, train_long_videos_path )
+def train():
+    # data w/o split
+    #train_data, _ = get_video_data(video_data_path, video_feat_path, train_ratio=0.9)
+    #print(train_data)
+    #print(type(train_data))
     
-    msvd_vocab_data = MSVD_get_video_data( train_sents_gt_path, train_video_feat_path )
-    captions = msvd_vocab_data['Description'].values
+    loss_vector = []
+    train_data = MSRVTT_get_video_data( train_val_sents_gt_path, train_val_video_feat_path, True )
+
+    captions = train_data['Description'].values
     captions = map(lambda x: x.replace('.', ''), captions)
     captions = map(lambda x: x.replace(',', ''), captions)    
     wordtoix, ixtoword, bias_init_vector = preProBuildWordVocab(captions, word_count_threshold=10)
-    
-    
+    np.save('./data/MSRVTT_ot/ixtoword', ixtoword)
+
     model = Video_Caption_Generator(
             dim_image=dim_image,
             n_words=len(wordtoix),
             dim_hidden=dim_hidden,
             batch_size=batch_size,
             n_lstm_steps=n_frame_step,
+            drop_out_rate = 0.5,
             bias_init_vector=bias_init_vector)
 
     tf_loss, tf_video, tf_video_mask, tf_caption, tf_caption_mask, tf_probs = model.build_model()
@@ -303,7 +291,7 @@ def train():
 
         current_train_data = train_data.groupby('video_path').apply(lambda x: x.irow(np.random.choice(len(x))))
         current_train_data = current_train_data.reset_index(drop=True)
-
+        epoch_loss = 0
         for start,end in zip(
                 range(0, len(current_train_data), batch_size),
                 range(batch_size, len(current_train_data), batch_size)):
@@ -347,10 +335,14 @@ def train():
                         tf_caption: current_caption_matrix,
                         tf_caption_mask: current_caption_masks
                         })
-
+            
+            epoch_loss = loss_val
             print loss_val
+            
+        loss_vector.append( epoch_loss )
         if np.mod(epoch, 100) == 0:
             print "Epoch ", epoch, " is done. Saving the model ..."
             saver.save(sess, os.path.join(model_path, 'model'), global_step=epoch)
+            np.save( os.path.join(model_path, 'loss-'+str(epoch)),loss_vector )
 
 train()

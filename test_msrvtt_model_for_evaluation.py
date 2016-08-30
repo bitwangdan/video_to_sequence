@@ -1,10 +1,10 @@
 #-*- coding: utf-8 -*-
 import tensorflow as tf
 import pandas as pd
-from pandas import Series, DataFrame
 import numpy as np
 import os
-import sys
+import ipdb
+
 import cv2
 
 from tensorflow.python.ops import rnn_cell
@@ -18,7 +18,7 @@ class Video_Caption_Generator():
         self.batch_size = batch_size
         self.n_lstm_steps = n_lstm_steps
 
-        with tf.device("/gpu:2"):
+        with tf.device("/gpu:3"):
             self.Wemb = tf.Variable(tf.random_uniform([n_words, dim_hidden], -0.1, 0.1), name='Wemb')
 
         self.lstm1 = rnn_cell.BasicLSTMCell(dim_hidden)
@@ -70,7 +70,7 @@ class Video_Caption_Generator():
             if i == 0:
                 current_embed = tf.zeros([self.batch_size, self.dim_hidden])
             else:
-                with tf.device("/gpu:2"):
+                with tf.device("/gpu:3"):
                     current_embed = tf.nn.embedding_lookup(self.Wemb, caption[:,i-1])
 
             tf.get_variable_scope().reuse_variables()
@@ -142,7 +142,7 @@ class Video_Caption_Generator():
             generated_words.append(max_prob_index)
             probs.append(logit_words)
 
-            with tf.device("/gpu:2"):
+            with tf.device("/gpu:3"):
                 current_embed = tf.nn.embedding_lookup(self.Wemb, max_prob_index)
                 current_embed = tf.expand_dims(current_embed, 0)
 
@@ -156,21 +156,9 @@ video_path = './youtube_videos'
 video_data_path='./video_corpus.csv'
 video_feat_path = './youtube_feats'
 
-train_video_feat_path = '/home2/dataset/MSVD/MSVD_train_feats'
-val_video_feat_path = '/home2/dataset/MSVD/MSVD_val_feats'
-
-
-train_long_videos_path = '/home2/dataset/MSVD/long_train.txt'
-train_short_videos_path = '/home2/dataset/MSVD/short_train.txt'
-
-train_sents_gt_path = '/home2/dataset/MSVD/train_sents_gt.txt'
-test_sents_gt_path = '/home2/dataset/MSVD/test_sents_gt.txt'
-val_sents_gt_path = '/home2/dataset/MSVD/val_sents_gt.txt'
-
 vgg16_path = './tfmodel/vgg16.tfmodel'
 
-#model_path = './MSVD_short_models1/'
-model_path = './MSVD_long_models1/'
+model_path = './models3/'
 ############## Train Parameters #################
 dim_image = 4096
 dim_hidden= 256
@@ -198,45 +186,6 @@ def get_video_data(video_data_path, video_feat_path, train_ratio=0.9):
     test_data = video_data[video_data['video_path'].map(lambda x: x in test_vids)]
 
     return train_data, test_data
-
-def MSVD_get_video_data( sents_gt_path, video_feat_path ):
-    video_path = []
-    description = []
-    videoID = []
-    with open(sents_gt_path) as file :
-        for line in file :
-            id_sent = line.strip().split('\t')
-            description.append( ''.join(id_sent[-1:]) ) #list to str
-            videoID.append( id_sent[0] )
-            video_path.append( os.path.join( video_feat_path, id_sent[0]+'.avi.npy' ) )    
-                        
-    video_data = DataFrame({'VideoID':videoID, 'Description':description, 'video_path':video_path})
-    
-    return video_data
-
-def MSVD_get_ls_video_data( sents_gt_path, video_feat_path, ls_path ):
-    video_path = []
-    description = []
-    videoID = []
-    ls_videoIDs = []
-    with open(ls_path) as file :
-        for line in file :
-            ls_videoIDs.append( line )
-        
-    with open(sents_gt_path) as file :
-        for line in file :
-            id_sent = line.strip().split('\t')
-            
-            for ls_videoID in ls_videoIDs: 
-                if ls_videoID.split('.')[0] == id_sent[0]:  
-                    description.append( ''.join(id_sent[-1:]) ) #list to str
-                    videoID.append( id_sent[0] )
-                    video_path.append( os.path.join( video_feat_path, id_sent[0]+'.avi.npy' ) )    
-                        
-    video_data = DataFrame({'VideoID':videoID, 'Description':description, 'video_path':video_path})
-    
-    return video_data
-
 
 def preProBuildWordVocab(sentence_iterator, word_count_threshold=5): # borrowed this function from NeuralTalk
     print 'preprocessing word counts and creating vocab based on word count threshold %d' % (word_count_threshold, )
@@ -267,90 +216,65 @@ def preProBuildWordVocab(sentence_iterator, word_count_threshold=5): # borrowed 
     bias_init_vector -= np.max(bias_init_vector) # shift to nice numeric range
     return wordtoix, ixtoword, bias_init_vector
 
-def train():    
-    # short videos
-    #train_data = MSVD_get_ls_video_data( train_sents_gt_path, train_video_feat_path, train_short_videos_path )
 
-    # long videos
-    train_data = MSVD_get_ls_video_data( train_sents_gt_path, train_video_feat_path, train_long_videos_path )
-    
-    msvd_vocab_data = MSVD_get_video_data( train_sents_gt_path, train_video_feat_path )
-    captions = msvd_vocab_data['Description'].values
-    captions = map(lambda x: x.replace('.', ''), captions)
-    captions = map(lambda x: x.replace(',', ''), captions)    
-    wordtoix, ixtoword, bias_init_vector = preProBuildWordVocab(captions, word_count_threshold=10)
-    
-    
+def test(model_path, test_feats_path):
+    test_videos = []
+    #for MSVD evaluation
+#     MSVDtest_range = range(1301,1971) #1301~1970
+#     for i in MSVDtest_range:    
+#         test_videos.append( os.path.join(test_feats_path, 'vid'+str(i)+'.avi.npy') )
+
+    MSRVTTval_range = range(6513,7010) #6513~7009
+    for i in MSRVTTval_range:    
+        test_videos.append( os.path.join(test_feats_path, 'video'+str(i)+'.mp4.npy') )
+
+
+    ixtoword = pd.Series(np.load('./data/MSRVTT_ot/ixtoword.npy').tolist())
     model = Video_Caption_Generator(
             dim_image=dim_image,
-            n_words=len(wordtoix),
+            n_words=len(ixtoword),
             dim_hidden=dim_hidden,
             batch_size=batch_size,
             n_lstm_steps=n_frame_step,
-            bias_init_vector=bias_init_vector)
+            bias_init_vector=None)
 
-    tf_loss, tf_video, tf_video_mask, tf_caption, tf_caption_mask, tf_probs = model.build_model()
+    video_tf, video_mask_tf, caption_tf, probs_tf, last_embed_tf = model.build_generator()
     sess = tf.InteractiveSession()
 
-    saver = tf.train.Saver(max_to_keep=10)
-    train_op = tf.train.AdamOptimizer(learning_rate).minimize(tf_loss)
-    tf.initialize_all_variables().run()
+    saver = tf.train.Saver()
+    saver.restore(sess, model_path)
+    output_file = './results/MSRVTT_val_vgg16_msrvtt2_900.txt' 
+    with open(output_file, 'w') as f:
+        f.write('')
+    
+    
+    for video_feat_path in test_videos:
+        print video_feat_path
+        video_feat = np.load(video_feat_path)[None,...]
+        if video_feat.shape[1] == n_frame_step:
+            video_mask = np.ones((video_feat.shape[0], video_feat.shape[1]))
 
-    for epoch in range(n_epochs):
-        index = list(train_data.index)
-        np.random.shuffle(index)
-        train_data = train_data.ix[index]
+        else:
+            shape_templete = np.zeros(shape=(1, n_frame_step, 4096), dtype=float )
+            shape_templete[:video_feat.shape[0],:video_feat.shape[1],:video_feat.shape[2]] = video_feat
+            video_feat = shape_templete
+            video_mask = np.ones((video_feat.shape[0], n_frame_step))
 
-        current_train_data = train_data.groupby('video_path').apply(lambda x: x.irow(np.random.choice(len(x))))
-        current_train_data = current_train_data.reset_index(drop=True)
+        generated_word_index = sess.run(caption_tf, feed_dict={video_tf:video_feat, video_mask_tf:video_mask})
+        probs_val = sess.run(probs_tf, feed_dict={video_tf:video_feat})
+        embed_val = sess.run(last_embed_tf, feed_dict={video_tf:video_feat})
+        generated_words = ixtoword[generated_word_index]
 
-        for start,end in zip(
-                range(0, len(current_train_data), batch_size),
-                range(batch_size, len(current_train_data), batch_size)):
+        punctuation = np.argmax(np.array(generated_words) == '.')+1
+        generated_words = generated_words[:punctuation]
 
-            current_batch = current_train_data[start:end]
-            current_videos = current_batch['video_path'].values
-
-            current_feats = np.zeros((batch_size, n_frame_step, dim_image))
-            current_feats_vals = map(lambda vid: np.load(vid), current_videos)
-
-            current_video_masks = np.zeros((batch_size, n_frame_step))
-
-            for ind,feat in enumerate(current_feats_vals):
-                current_feats[ind][:len(current_feats_vals[ind])] = feat
-                current_video_masks[ind][:len(current_feats_vals[ind])] = 1
-
-            current_captions = current_batch['Description'].values
-            current_captions = map(lambda x: x.replace('.', ''), current_captions)
-            current_captions = map(lambda x: x.replace(',', ''), current_captions)
-            current_caption_ind = map(lambda cap: [wordtoix[word] for word in cap.lower().split(' ') if word in wordtoix], current_captions)                        
-            current_captions_ = map( lambda sent: [ixtoword[ix] for ix in sent], current_caption_ind )
+        generated_sentence = ' '.join(generated_words)
+        video_id = os.path.basename(video_feat_path).split('.')[0].replace('video', 'vid')
+        with open(output_file, 'a') as f:
+            f.write( '\t{}\t{}\n'.format( video_id, generated_sentence ) )
             
-            current_caption_matrix = sequence.pad_sequences(current_caption_ind, padding='post', maxlen=n_frame_step-1)
-            current_caption_matrix = np.hstack( [current_caption_matrix, np.zeros( [len(current_caption_matrix),1]) ] ).astype(int)
-            current_caption_masks = np.zeros((current_caption_matrix.shape[0], current_caption_matrix.shape[1]))
-            nonzeros = np.array( map(lambda x: (x != 0).sum()+1, current_caption_matrix ))
+        print '{} {}'.format( video_id, generated_sentence )
 
-            for ind, row in enumerate(current_caption_masks):
-                row[:nonzeros[ind]] = 1
 
-            probs_val = sess.run(tf_probs, feed_dict={
-                tf_video:current_feats,
-                tf_caption: current_caption_matrix
-                })
-
-            _, loss_val = sess.run(
-                    [train_op, tf_loss],
-                    feed_dict={
-                        tf_video: current_feats,
-                        tf_video_mask : current_video_masks,
-                        tf_caption: current_caption_matrix,
-                        tf_caption_mask: current_caption_masks
-                        })
-
-            print loss_val
-        if np.mod(epoch, 100) == 0:
-            print "Epoch ", epoch, " is done. Saving the model ..."
-            saver.save(sess, os.path.join(model_path, 'model'), global_step=epoch)
-
-train()
+#test('MSRVTT_models2/model-900', '/home2/dataset/MSVD/MSVD_test_feats')
+test('MSRVTT_models2/model-900', '/home2/dataset/MSR-VTT/train_val_feats')

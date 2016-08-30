@@ -170,7 +170,7 @@ val_sents_gt_path = '/home2/dataset/MSVD/val_sents_gt.txt'
 vgg16_path = './tfmodel/vgg16.tfmodel'
 
 #model_path = './MSVD_short_models1/'
-model_path = './MSVD_long_ft_models1/'
+model_path = './MSVD_long_ft_models3/'
 ############## Train Parameters #################
 dim_image = 4096
 dim_hidden= 256
@@ -180,7 +180,7 @@ batch_size = 100
 # From scratch
 #learning_rate = 0.001
 # fine tune
-learning_rate = 0.00001
+learning_rate = 0.0001
 ##################################################
 
 def get_video_data(video_data_path, video_feat_path, train_ratio=0.9):
@@ -269,92 +269,6 @@ def preProBuildWordVocab(sentence_iterator, word_count_threshold=5): # borrowed 
     bias_init_vector = np.log(bias_init_vector)
     bias_init_vector -= np.max(bias_init_vector) # shift to nice numeric range
     return wordtoix, ixtoword, bias_init_vector
-
-def train():    
-    # short videos
-    #train_data = MSVD_get_ls_video_data( train_sents_gt_path, train_video_feat_path, train_short_videos_path )
-
-    # long videos
-    train_data = MSVD_get_ls_video_data( train_sents_gt_path, train_video_feat_path, train_long_videos_path )
-    
-    msvd_vocab_data = MSVD_get_video_data( train_sents_gt_path, train_video_feat_path )
-    captions = msvd_vocab_data['Description'].values
-    captions = map(lambda x: x.replace('.', ''), captions)
-    captions = map(lambda x: x.replace(',', ''), captions)    
-    wordtoix, ixtoword, bias_init_vector = preProBuildWordVocab(captions, word_count_threshold=10)
-    
-    
-    model = Video_Caption_Generator(
-            dim_image=dim_image,
-            n_words=len(wordtoix),
-            dim_hidden=dim_hidden,
-            batch_size=batch_size,
-            n_lstm_steps=n_frame_step,
-            bias_init_vector=bias_init_vector)
-
-    tf_loss, tf_video, tf_video_mask, tf_caption, tf_caption_mask, tf_probs = model.build_model()
-    sess = tf.InteractiveSession()
-
-    saver = tf.train.Saver(max_to_keep=10)
-    train_op = tf.train.AdamOptimizer(learning_rate).minimize(tf_loss)
-    tf.initialize_all_variables().run()
-
-    for epoch in range(n_epochs):
-        index = list(train_data.index)
-        np.random.shuffle(index)
-        train_data = train_data.ix[index]
-
-        current_train_data = train_data.groupby('video_path').apply(lambda x: x.irow(np.random.choice(len(x))))
-        current_train_data = current_train_data.reset_index(drop=True)
-
-        for start,end in zip(
-                range(0, len(current_train_data), batch_size),
-                range(batch_size, len(current_train_data), batch_size)):
-
-            current_batch = current_train_data[start:end]
-            current_videos = current_batch['video_path'].values
-
-            current_feats = np.zeros((batch_size, n_frame_step, dim_image))
-            current_feats_vals = map(lambda vid: np.load(vid), current_videos)
-
-            current_video_masks = np.zeros((batch_size, n_frame_step))
-
-            for ind,feat in enumerate(current_feats_vals):
-                current_feats[ind][:len(current_feats_vals[ind])] = feat
-                current_video_masks[ind][:len(current_feats_vals[ind])] = 1
-
-            current_captions = current_batch['Description'].values
-            current_captions = map(lambda x: x.replace('.', ''), current_captions)
-            current_captions = map(lambda x: x.replace(',', ''), current_captions)
-            current_caption_ind = map(lambda cap: [wordtoix[word] for word in cap.lower().split(' ') if word in wordtoix], current_captions)                        
-            current_captions_ = map( lambda sent: [ixtoword[ix] for ix in sent], current_caption_ind )
-            
-            current_caption_matrix = sequence.pad_sequences(current_caption_ind, padding='post', maxlen=n_frame_step-1)
-            current_caption_matrix = np.hstack( [current_caption_matrix, np.zeros( [len(current_caption_matrix),1]) ] ).astype(int)
-            current_caption_masks = np.zeros((current_caption_matrix.shape[0], current_caption_matrix.shape[1]))
-            nonzeros = np.array( map(lambda x: (x != 0).sum()+1, current_caption_matrix ))
-
-            for ind, row in enumerate(current_caption_masks):
-                row[:nonzeros[ind]] = 1
-
-            probs_val = sess.run(tf_probs, feed_dict={
-                tf_video:current_feats,
-                tf_caption: current_caption_matrix
-                })
-
-            _, loss_val = sess.run(
-                    [train_op, tf_loss],
-                    feed_dict={
-                        tf_video: current_feats,
-                        tf_video_mask : current_video_masks,
-                        tf_caption: current_caption_matrix,
-                        tf_caption_mask: current_caption_masks
-                        })
-
-            print loss_val
-        if np.mod(epoch, 100) == 0:
-            print "Epoch ", epoch, " is done. Saving the model ..."
-            saver.save(sess, os.path.join(model_path, 'model'), global_step=epoch)
 
 def fine_tune( pre_trained_model ):    
     # train from short videos
@@ -445,5 +359,4 @@ def fine_tune( pre_trained_model ):
             print "Epoch ", epoch, " is done. Saving the model ..."
             saver.save(sess, os.path.join(model_path, 'model'), global_step=epoch)
                         
-#train()
 fine_tune( './MSVD_long_models1/model-900' )
