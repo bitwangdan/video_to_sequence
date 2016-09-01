@@ -11,19 +11,25 @@ from tensorflow.python.ops import rnn_cell
 from keras.preprocessing import sequence
 
 class Video_Caption_Generator():
-    def __init__(self, dim_image, n_words, dim_hidden, batch_size, n_lstm_steps, bias_init_vector=None):
+    def __init__(self, dim_image, n_words, dim_hidden, batch_size, n_lstm_steps, drop_out_rate, bias_init_vector=None):
         self.dim_image = dim_image
         self.n_words = n_words
         self.dim_hidden = dim_hidden
         self.batch_size = batch_size
         self.n_lstm_steps = n_lstm_steps
+        self.drop_out_rate = drop_out_rate
 
         with tf.device("/gpu:3"):
             self.Wemb = tf.Variable(tf.random_uniform([n_words, dim_hidden], -0.1, 0.1), name='Wemb')
 
-        self.lstm1 = rnn_cell.BasicLSTMCell(dim_hidden)
-        self.lstm2 = rnn_cell.BasicLSTMCell(dim_hidden)
-
+#         self.lstm1 = rnn_cell.BasicLSTMCell(dim_hidden)
+#         self.lstm2 = rnn_cell.BasicLSTMCell(dim_hidden)
+        
+        self.lstm1 = rnn_cell.LSTMCell(self.dim_hidden,self.dim_hidden,use_peepholes = True)
+        self.lstm1_dropout = rnn_cell.DropoutWrapper(self.lstm1,output_keep_prob=1 - self.drop_out_rate)
+        self.lstm2 = rnn_cell.LSTMCell(self.dim_hidden,self.dim_hidden,use_peepholes = True)
+        self.lstm2_dropout = rnn_cell.DropoutWrapper(self.lstm2,output_keep_prob=1 - self.drop_out_rate)
+    
         self.encode_image_W = tf.Variable( tf.random_uniform([dim_image, dim_hidden], -0.1, 0.1), name='encode_image_W')
         self.encode_image_b = tf.Variable( tf.zeros([dim_hidden]), name='encode_image_b')
 
@@ -57,10 +63,12 @@ class Video_Caption_Generator():
                 tf.get_variable_scope().reuse_variables()
 
             with tf.variable_scope("LSTM1"):
-                output1, state1 = self.lstm1( image_emb[:,i,:], state1 )
+                #output1, state1 = self.lstm1( image_emb[:,i,:], state1 )
+                output1, state1 = self.lstm1_dropout( image_emb[:,i,:], state1 )
 
             with tf.variable_scope("LSTM2"):
-                output2, state2 = self.lstm2( tf.concat(1,[padding, output1]), state2 )
+                #output2, state2 = self.lstm2( tf.concat(1,[padding,output1]), state2 )
+                output2, state2 = self.lstm2_dropout( tf.concat(1,[padding,output1]), state2 )
 
         # Each video might have different length. Need to mask those.
         # But how? Padding with 0 would be enough?
@@ -75,10 +83,12 @@ class Video_Caption_Generator():
 
             tf.get_variable_scope().reuse_variables()
             with tf.variable_scope("LSTM1"):
-                output1, state1 = self.lstm1( padding, state1 )
+                #output1, state1 = self.lstm1( padding, state1 )
+                output1, state1 = self.lstm1_dropout( padding, state1 )
 
             with tf.variable_scope("LSTM2"):
-                output2, state2 = self.lstm2( tf.concat(1,[current_embed, output1]), state2 )
+                #output2, state2 = self.lstm2( tf.concat(1,[current_embed,output1]), state2 )
+                output2, state2 = self.lstm2_dropout( tf.concat(1,[current_embed,output1]), state2 )
 
             labels = tf.expand_dims(caption[:,i], 1)
             indices = tf.expand_dims(tf.range(0, self.batch_size, 1), 1)
@@ -119,10 +129,12 @@ class Video_Caption_Generator():
             if i > 0: tf.get_variable_scope().reuse_variables()
 
             with tf.variable_scope("LSTM1"):
-                output1, state1 = self.lstm1( image_emb[:,i,:], state1 )
-
+                #output1, state1 = self.lstm1( image_emb[:,i,:], state1 )
+                output1, state1 = self.lstm1_dropout( image_emb[:,i,:], state1 )
+                
             with tf.variable_scope("LSTM2"):
-                output2, state2 = self.lstm2( tf.concat(1,[padding,output1]), state2 )
+                #output2, state2 = self.lstm2( tf.concat(1,[padding,output1]), state2 )
+                output2, state2 = self.lstm2_dropout( tf.concat(1,[padding,output1]), state2 )
 
         for i in range(self.n_lstm_steps):
 
@@ -132,11 +144,14 @@ class Video_Caption_Generator():
                 current_embed = tf.zeros([1, self.dim_hidden])
 
             with tf.variable_scope("LSTM1"):
-                output1, state1 = self.lstm1( padding, state1 )
-
+                #output1, state1 = self.lstm1( padding, state1 )
+                output1, state1 = self.lstm1_dropout( padding, state1 )
+                
             with tf.variable_scope("LSTM2"):
-                output2, state2 = self.lstm2( tf.concat(1,[current_embed,output1]), state2 )
+                #output2, state2 = self.lstm2( tf.concat(1,[current_embed,output1]), state2 )
+                output2, state2 = self.lstm2_dropout( tf.concat(1,[current_embed,output1]), state2 )
 
+                
             logit_words = tf.nn.xw_plus_b( output2, self.embed_word_W, self.embed_word_b)
             max_prob_index = tf.argmax(logit_words, 1)[0]
             generated_words.append(max_prob_index)
@@ -236,6 +251,7 @@ def test(model_path, test_feats_path):
             dim_hidden=dim_hidden,
             batch_size=batch_size,
             n_lstm_steps=n_frame_step,
+            drop_out_rate = 0,
             bias_init_vector=None)
 
     video_tf, video_mask_tf, caption_tf, probs_tf, last_embed_tf = model.build_generator()
@@ -243,7 +259,7 @@ def test(model_path, test_feats_path):
 
     saver = tf.train.Saver()
     saver.restore(sess, model_path)
-    output_file = './results/MSRVTT_val_vgg16_msrvtt2_900.txt' 
+    output_file = './results/MSRVTT_val_vgg16_msrvtt3_700.txt' 
     with open(output_file, 'w') as f:
         f.write('')
     
@@ -277,4 +293,4 @@ def test(model_path, test_feats_path):
 
 
 #test('MSRVTT_models2/model-900', '/home2/dataset/MSVD/MSVD_test_feats')
-test('MSRVTT_models2/model-900', '/home2/dataset/MSR-VTT/train_val_feats')
+test('MSRVTT_models3/model-700', '/home2/dataset/MSR-VTT/train_val_feats')
