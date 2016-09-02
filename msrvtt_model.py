@@ -112,60 +112,6 @@ class Video_Caption_Generator():
         loss = loss / tf.reduce_sum(caption_mask)
         return loss, video, video_mask, caption, caption_mask, probs
 
-
-    def build_generator(self):
-        video = tf.placeholder(tf.float32, [1, self.n_lstm_steps, self.dim_image])
-        video_mask = tf.placeholder(tf.float32, [1, self.n_lstm_steps])
-
-        video_flat = tf.reshape(video, [-1, self.dim_image])
-        image_emb = tf.nn.xw_plus_b( video_flat, self.encode_image_W, self.encode_image_b)
-        image_emb = tf.reshape(image_emb, [1, self.n_lstm_steps, self.dim_hidden])
-
-        state1 = tf.zeros([1, self.lstm1.state_size])
-        state2 = tf.zeros([1, self.lstm2.state_size])
-        padding = tf.zeros([1, self.dim_hidden])
-
-        generated_words = []
-
-        probs = []
-        embeds = []
-
-        for i in range(self.n_lstm_steps):
-            if i > 0: tf.get_variable_scope().reuse_variables()
-
-            with tf.variable_scope("LSTM1"):
-                output1, state1 = self.lstm1( image_emb[:,i,:], state1 )
-
-            with tf.variable_scope("LSTM2"):
-                output2, state2 = self.lstm2( tf.concat(1,[padding,output1]), state2 )
-
-        for i in range(self.n_lstm_steps):
-
-            tf.get_variable_scope().reuse_variables()
-
-            if i == 0:
-                current_embed = tf.zeros([1, self.dim_hidden])
-
-            with tf.variable_scope("LSTM1"):
-                output1, state1 = self.lstm1( padding, state1 )
-
-            with tf.variable_scope("LSTM2"):
-                output2, state2 = self.lstm2( tf.concat(1,[current_embed,output1]), state2 )
-
-            logit_words = tf.nn.xw_plus_b( output2, self.embed_word_W, self.embed_word_b)
-            max_prob_index = tf.argmax(logit_words, 1)[0]
-            generated_words.append(max_prob_index)
-            probs.append(logit_words)
-
-            with tf.device("/gpu:2"):
-                current_embed = tf.nn.embedding_lookup(self.Wemb, max_prob_index)
-                current_embed = tf.expand_dims(current_embed, 0)
-
-            embeds.append(current_embed)
-
-        return video, video_mask, generated_words, probs, embeds
-
-
 ############### Global Parameters ###############
 video_path = './youtube_videos'
 video_data_path='./video_corpus.csv'
@@ -174,8 +120,6 @@ video_feat_path = './youtube_feats'
 train_val_video_feat_path = '/home2/dataset/MSR-VTT/train_val_feats'
 
 train_val_sents_gt_path = '/home2/dataset/MSR-VTT/train_val_sents_gt.txt'
-
-vgg16_path = './tfmodel/vgg16.tfmodel'
 
 model_path = './MSRVTT_models3/'
 ############## Train Parameters #################
@@ -253,13 +197,14 @@ def preProBuildWordVocab(sentence_iterator, word_count_threshold=5): # borrowed 
     bias_init_vector -= np.max(bias_init_vector) # shift to nice numeric range
     return wordtoix, ixtoword, bias_init_vector
 
-def train():
+def train( restore=False, restore_model='' ):
     # data w/o split
     #train_data, _ = get_video_data(video_data_path, video_feat_path, train_ratio=0.9)
     #print(train_data)
     #print(type(train_data))
     
     loss_vector = []
+    pre_epochs = 0
     train_data = MSRVTT_get_video_data( train_val_sents_gt_path, train_val_video_feat_path, True )
 
     captions = train_data['Description'].values
@@ -278,13 +223,25 @@ def train():
             bias_init_vector=bias_init_vector)
 
     tf_loss, tf_video, tf_video_mask, tf_caption, tf_caption_mask, tf_probs = model.build_model()
-    sess = tf.InteractiveSession()
+    sess = tf.InteractiveSession()    
 
-    saver = tf.train.Saver(max_to_keep=10)
-    train_op = tf.train.AdamOptimizer(learning_rate).minimize(tf_loss)
-    tf.initialize_all_variables().run()
+    if restore == True:
+        pre_epochs = int(os.path.basename( restore_model ).split('-')[1])
+        loss_vector = np.load( os.path.join( os.path.dirname(restore_model), 'loss-'+str(pre_epochs)+'.npy' ) ).tolist()
+        train_op = tf.train.AdamOptimizer(learning_rate).minimize(tf_loss)
+        tf.initialize_all_variables().run() 
+        saver = tf.train.Saver()
+        saver.restore(sess, restore_model)
+    else:
+        train_op = tf.train.AdamOptimizer(learning_rate).minimize(tf_loss)
+        tf.initialize_all_variables().run() 
+        saver = tf.train.Saver(max_to_keep=10)
 
-    for epoch in range(n_epochs):
+  
+    for epoch in range(n_epochs+1):
+        if restore == True:
+            epoch = epoch + pre_epochs
+       
         index = list(train_data.index)
         np.random.shuffle(index)
         train_data = train_data.ix[index]
@@ -341,8 +298,9 @@ def train():
             
         loss_vector.append( epoch_loss )
         if np.mod(epoch, 100) == 0:
-            print "Epoch ", epoch, " is done. Saving the model ..."
-            saver.save(sess, os.path.join(model_path, 'model'), global_step=epoch)
-            np.save( os.path.join(model_path, 'loss-'+str(epoch)),loss_vector )
+            if restore == False or epoch-pre_epochs != 0:
+                print "Epoch ", epoch, " is done. Saving the model ..."
+                saver.save(sess, os.path.join(model_path, 'model'), global_step=epoch)
+                np.save( os.path.join(model_path, 'loss-'+str(epoch)),loss_vector )
 
-train()
+train(True, 'MSRVTT_models5/model-400')

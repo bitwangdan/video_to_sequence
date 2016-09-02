@@ -39,74 +39,6 @@ class Video_Caption_Generator():
         else:
             self.embed_word_b = tf.Variable(tf.zeros([n_words]), name='embed_word_b')
 
-    def build_model(self):
-        video = tf.placeholder(tf.float32, [self.batch_size, self.n_lstm_steps, self.dim_image])
-        video_mask = tf.placeholder(tf.float32, [self.batch_size, self.n_lstm_steps])
-
-        caption = tf.placeholder(tf.int32, [self.batch_size, self.n_lstm_steps])
-        caption_mask = tf.placeholder(tf.float32, [self.batch_size, self.n_lstm_steps])
-
-        video_flat = tf.reshape(video, [-1, self.dim_image])
-        image_emb = tf.nn.xw_plus_b( video_flat, self.encode_image_W, self.encode_image_b) # (batch_size*n_lstm_steps, dim_hidden)
-        image_emb = tf.reshape(image_emb, [self.batch_size, self.n_lstm_steps, self.dim_hidden])
-
-        state1 = tf.zeros([self.batch_size, self.lstm1.state_size])
-        state2 = tf.zeros([self.batch_size, self.lstm2.state_size])
-        padding = tf.zeros([self.batch_size, self.dim_hidden])
-
-        probs = []
-
-        loss = 0.0
-
-        for i in range(self.n_lstm_steps): ## Phase 1 => only read frames
-            if i > 0:
-                tf.get_variable_scope().reuse_variables()
-
-            with tf.variable_scope("LSTM1"):
-                #output1, state1 = self.lstm1( image_emb[:,i,:], state1 )
-                output1, state1 = self.lstm1_dropout( image_emb[:,i,:], state1 )
-
-            with tf.variable_scope("LSTM2"):
-                #output2, state2 = self.lstm2( tf.concat(1,[padding,output1]), state2 )
-                output2, state2 = self.lstm2_dropout( tf.concat(1,[padding,output1]), state2 )
-
-        # Each video might have different length. Need to mask those.
-        # But how? Padding with 0 would be enough?
-        # Therefore... TODO: for those short videos, keep the last LSTM hidden and output til the end.
-
-        for i in range(self.n_lstm_steps): ## Phase 2 => only generate captions
-            if i == 0:
-                current_embed = tf.zeros([self.batch_size, self.dim_hidden])
-            else:
-                with tf.device("/gpu:3"):
-                    current_embed = tf.nn.embedding_lookup(self.Wemb, caption[:,i-1])
-
-            tf.get_variable_scope().reuse_variables()
-            with tf.variable_scope("LSTM1"):
-                #output1, state1 = self.lstm1( padding, state1 )
-                output1, state1 = self.lstm1_dropout( padding, state1 )
-
-            with tf.variable_scope("LSTM2"):
-                #output2, state2 = self.lstm2( tf.concat(1,[current_embed,output1]), state2 )
-                output2, state2 = self.lstm2_dropout( tf.concat(1,[current_embed,output1]), state2 )
-
-            labels = tf.expand_dims(caption[:,i], 1)
-            indices = tf.expand_dims(tf.range(0, self.batch_size, 1), 1)
-            concated = tf.concat(1, [indices, labels])
-            onehot_labels = tf.sparse_to_dense(concated, tf.pack([self.batch_size, self.n_words]), 1.0, 0.0)
-
-            logit_words = tf.nn.xw_plus_b(output2, self.embed_word_W, self.embed_word_b)
-            cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logit_words, onehot_labels)
-            cross_entropy = cross_entropy * caption_mask[:,i]
-
-            probs.append(logit_words)
-
-            current_loss = tf.reduce_sum(cross_entropy)
-            loss += current_loss
-
-        loss = loss / tf.reduce_sum(caption_mask)
-        return loss, video, video_mask, caption, caption_mask, probs
-
 
     def build_generator(self):
         video = tf.placeholder(tf.float32, [1, self.n_lstm_steps, self.dim_image])
@@ -171,9 +103,7 @@ video_path = './youtube_videos'
 video_data_path='./video_corpus.csv'
 video_feat_path = './youtube_feats'
 
-vgg16_path = './tfmodel/vgg16.tfmodel'
 
-model_path = './models3/'
 ############## Train Parameters #################
 dim_image = 4096
 dim_hidden= 256
@@ -235,13 +165,13 @@ def preProBuildWordVocab(sentence_iterator, word_count_threshold=5): # borrowed 
 def test(model_path, test_feats_path):
     test_videos = []
     #for MSVD evaluation
-#     MSVDtest_range = range(1301,1971) #1301~1970
-#     for i in MSVDtest_range:    
-#         test_videos.append( os.path.join(test_feats_path, 'vid'+str(i)+'.avi.npy') )
+    MSVDtest_range = range(1301,1971) #1301~1970
+    for i in MSVDtest_range:    
+        test_videos.append( os.path.join(test_feats_path, 'vid'+str(i)+'.avi.npy') )
 
-    MSRVTTval_range = range(6513,7010) #6513~7009
-    for i in MSRVTTval_range:    
-        test_videos.append( os.path.join(test_feats_path, 'video'+str(i)+'.mp4.npy') )
+#     MSRVTTval_range = range(6513,7010) #6513~7009
+#     for i in MSRVTTval_range:    
+#         test_videos.append( os.path.join(test_feats_path, 'video'+str(i)+'.mp4.npy') )
 
 
     ixtoword = pd.Series(np.load('./data/MSRVTT_ot/ixtoword.npy').tolist())
@@ -259,7 +189,8 @@ def test(model_path, test_feats_path):
 
     saver = tf.train.Saver()
     saver.restore(sess, model_path)
-    output_file = './results/MSRVTT_val_vgg16_msrvtt3_700.txt' 
+    output_file = './results/MSVD_test_vgg16_msrvtt3_900.txt'     
+    #output_file = './results/MSRVTT_val_vgg16_msrvtt3_700.txt' 
     with open(output_file, 'w') as f:
         f.write('')
     
@@ -292,5 +223,5 @@ def test(model_path, test_feats_path):
         print '{} {}'.format( video_id, generated_sentence )
 
 
-#test('MSRVTT_models2/model-900', '/home2/dataset/MSVD/MSVD_test_feats')
-test('MSRVTT_models3/model-700', '/home2/dataset/MSR-VTT/train_val_feats')
+test('MSRVTT_models3/model-900', '/home2/dataset/MSVD/MSVD_test_feats')
+#test('MSRVTT_models3/model-700', '/home2/dataset/MSR-VTT/train_val_feats')
