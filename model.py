@@ -12,18 +12,24 @@ from tensorflow.python.ops import rnn_cell
 from keras.preprocessing import sequence
 
 class Video_Caption_Generator():
-    def __init__(self, dim_image, n_words, dim_hidden, batch_size, n_lstm_steps, bias_init_vector=None):
+    def __init__(self, dim_image, n_words, dim_hidden, batch_size, n_lstm_steps, drop_out_rate, bias_init_vector=None):
         self.dim_image = dim_image
         self.n_words = n_words
         self.dim_hidden = dim_hidden
         self.batch_size = batch_size
         self.n_lstm_steps = n_lstm_steps
+        self.drop_out_rate = drop_out_rate
 
         with tf.device("/gpu:2"):
             self.Wemb = tf.Variable(tf.random_uniform([n_words, dim_hidden], -0.1, 0.1), name='Wemb')
 
-        self.lstm1 = rnn_cell.BasicLSTMCell(dim_hidden)
-        self.lstm2 = rnn_cell.BasicLSTMCell(dim_hidden)
+#         self.lstm1 = rnn_cell.BasicLSTMCell(dim_hidden)
+#         self.lstm2 = rnn_cell.BasicLSTMCell(dim_hidden)
+
+        self.lstm1 = rnn_cell.LSTMCell(self.dim_hidden,self.dim_hidden,use_peepholes = True)
+        self.lstm1_dropout = rnn_cell.DropoutWrapper(self.lstm1,output_keep_prob=1 - self.drop_out_rate)
+        self.lstm2 = rnn_cell.LSTMCell(self.dim_hidden,self.dim_hidden,use_peepholes = True)
+        self.lstm2_dropout = rnn_cell.DropoutWrapper(self.lstm2,output_keep_prob=1 - self.drop_out_rate)
 
         self.encode_image_W = tf.Variable( tf.random_uniform([dim_image, dim_hidden], -0.1, 0.1), name='encode_image_W')
         self.encode_image_b = tf.Variable( tf.zeros([dim_hidden]), name='encode_image_b')
@@ -58,11 +64,13 @@ class Video_Caption_Generator():
                 tf.get_variable_scope().reuse_variables()
 
             with tf.variable_scope("LSTM1"):
-                output1, state1 = self.lstm1( image_emb[:,i,:], state1 )
+                #output1, state1 = self.lstm1( image_emb[:,i,:], state1 )
+                output1, state1 = self.lstm1_dropout( image_emb[:,i,:], state1 )
 
             with tf.variable_scope("LSTM2"):
-                output2, state2 = self.lstm2( tf.concat(1,[padding, output1]), state2 )
-
+                #output2, state2 = self.lstm2( tf.concat(1,[padding,output1]), state2 )
+                output2, state2 = self.lstm2_dropout( tf.concat(1,[padding,output1]), state2 )
+                
         # Each video might have different length. Need to mask those.
         # But how? Padding with 0 would be enough?
         # Therefore... TODO: for those short videos, keep the last LSTM hidden and output til the end.
@@ -76,10 +84,12 @@ class Video_Caption_Generator():
 
             tf.get_variable_scope().reuse_variables()
             with tf.variable_scope("LSTM1"):
-                output1, state1 = self.lstm1( padding, state1 )
-
+                #output1, state1 = self.lstm1( padding, state1 )
+                output1, state1 = self.lstm1_dropout( padding, state1 )
+                
             with tf.variable_scope("LSTM2"):
-                output2, state2 = self.lstm2( tf.concat(1,[current_embed, output1]), state2 )
+                #output2, state2 = self.lstm2( tf.concat(1,[current_embed,output1]), state2 )
+                output2, state2 = self.lstm2_dropout( tf.concat(1,[current_embed,output1]), state2 )
 
             labels = tf.expand_dims(caption[:,i], 1)
             indices = tf.expand_dims(tf.range(0, self.batch_size, 1), 1)
@@ -171,7 +181,7 @@ model_path = './MSVD_models1/'
 dim_image = 4096
 dim_hidden= 256
 n_frame_step = 80
-n_epochs = 1000
+n_epochs = 10000
 batch_size = 100
 learning_rate = 0.001
 ##################################################
@@ -245,6 +255,8 @@ def train():
     #print(train_data)
     #print(type(train_data))
     
+    loss_vector = []
+    
     train_data = MSVD_get_video_data( train_sents_gt_path, train_video_feat_path )
 
     captions = train_data['Description'].values
@@ -259,16 +271,17 @@ def train():
             dim_hidden=dim_hidden,
             batch_size=batch_size,
             n_lstm_steps=n_frame_step,
+            drop_out_rate = 0.5,
             bias_init_vector=bias_init_vector)
 
     tf_loss, tf_video, tf_video_mask, tf_caption, tf_caption_mask, tf_probs = model.build_model()
     sess = tf.InteractiveSession()
 
-    saver = tf.train.Saver(max_to_keep=10)
     train_op = tf.train.AdamOptimizer(learning_rate).minimize(tf_loss)
+    saver = tf.train.Saver(max_to_keep=10)
     tf.initialize_all_variables().run()
 
-    for epoch in range(n_epochs):
+    for epoch in range(n_epochs+1):
         index = list(train_data.index)
         np.random.shuffle(index)
         train_data = train_data.ix[index]
@@ -320,10 +333,14 @@ def train():
                         tf_caption_mask: current_caption_masks
                         })
 
+            epoch_loss = loss_val
             print loss_val
+            
+        loss_vector.append( epoch_loss )
         if np.mod(epoch, 100) == 0:
             print "Epoch ", epoch, " is done. Saving the model ..."
             saver.save(sess, os.path.join(model_path, 'model'), global_step=epoch)
+            np.save( os.path.join(model_path, 'loss-'+str(epoch)),loss_vector )
 
 def test(model_path='models/model-900', video_feat_path=video_feat_path):
 

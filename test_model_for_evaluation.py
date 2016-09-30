@@ -256,8 +256,8 @@ def test(model_path, test_feats_path):
             video_mask = np.ones((video_feat.shape[0], n_frame_step))
 
         generated_word_index = sess.run(caption_tf, feed_dict={video_tf:video_feat, video_mask_tf:video_mask})
-        probs_val = sess.run(probs_tf, feed_dict={video_tf:video_feat})
-        embed_val = sess.run(last_embed_tf, feed_dict={video_tf:video_feat})
+#         probs_val = sess.run(probs_tf, feed_dict={video_tf:video_feat})
+#         embed_val = sess.run(last_embed_tf, feed_dict={video_tf:video_feat})
         generated_words = ixtoword[generated_word_index]
 
         punctuation = np.argmax(np.array(generated_words) == '.')+1

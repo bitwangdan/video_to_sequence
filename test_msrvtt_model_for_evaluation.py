@@ -189,7 +189,7 @@ def test(model_path, test_feats_path):
 
     saver = tf.train.Saver()
     saver.restore(sess, model_path)
-    output_file = './results/MSVD_test_vgg16_msrvtt3_900.txt'     
+    output_file = './results/MSVD_test_vgg16_msrvtt_ft1_1000.txt'     
     #output_file = './results/MSRVTT_val_vgg16_msrvtt3_700.txt' 
     with open(output_file, 'w') as f:
         f.write('')
@@ -208,8 +208,8 @@ def test(model_path, test_feats_path):
             video_mask = np.ones((video_feat.shape[0], n_frame_step))
 
         generated_word_index = sess.run(caption_tf, feed_dict={video_tf:video_feat, video_mask_tf:video_mask})
-        probs_val = sess.run(probs_tf, feed_dict={video_tf:video_feat})
-        embed_val = sess.run(last_embed_tf, feed_dict={video_tf:video_feat})
+#         probs_val = sess.run(probs_tf, feed_dict={video_tf:video_feat})
+#         embed_val = sess.run(last_embed_tf, feed_dict={video_tf:video_feat})
         generated_words = ixtoword[generated_word_index]
 
         punctuation = np.argmax(np.array(generated_words) == '.')+1
@@ -223,5 +223,5 @@ def test(model_path, test_feats_path):
         print '{} {}'.format( video_id, generated_sentence )
 
 
-test('MSRVTT_models3/model-900', '/home2/dataset/MSVD/MSVD_test_feats')
-#test('MSRVTT_models3/model-700', '/home2/dataset/MSR-VTT/train_val_feats')
+test('MSRVTT_ft_models1/model-1000', '/home2/dataset/MSVD/MSVD_test_feats')
+#test('MSRVTT_models3/model-800', '/home2/dataset/MSR-VTT/train_val_feats')

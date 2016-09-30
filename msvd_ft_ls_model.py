@@ -206,7 +206,7 @@ def MSVD_get_video_data( sents_gt_path, video_feat_path ):
     video_path = []
     description = []
     videoID = []
-    with open(train_sents_gt_path) as file :
+    with open(sents_gt_path) as file :
         for line in file :
             id_sent = line.strip().split('\t')
             description.append( ''.join(id_sent[-1:]) ) #list to str
@@ -226,7 +226,7 @@ def MSVD_get_ls_video_data( sents_gt_path, video_feat_path, ls_path ):
         for line in file :
             ls_videoIDs.append( line )
         
-    with open(train_sents_gt_path) as file :
+    with open(sents_gt_path) as file :
         for line in file :
             id_sent = line.strip().split('\t')
             

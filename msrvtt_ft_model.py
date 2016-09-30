@@ -118,10 +118,13 @@ video_data_path='./video_corpus.csv'
 video_feat_path = './youtube_feats'
 
 train_val_video_feat_path = '/home2/dataset/MSR-VTT/train_val_feats'
-
 train_val_sents_gt_path = '/home2/dataset/MSR-VTT/train_val_sents_gt.txt'
 
-model_path = './MSRVTT_models3/'
+ft_train_video_feat_path = '/home2/dataset/MSVD/MSVD_train_feats'
+ft_train_sents_gt_path = '/home2/dataset/MSVD/train_sents_gt.txt'
+
+model_path = './MSRVTT_ft_models1/'
+
 ############## Train Parameters #################
 dim_image = 4096
 dim_hidden= 256
@@ -168,6 +171,22 @@ def MSRVTT_get_video_data( sents_gt_path, video_feat_path, only_train_data=False
     
     return video_data
 
+def MSVD_get_video_data( sents_gt_path, video_feat_path ):
+    video_path = []
+    description = []
+    videoID = []
+    with open(sents_gt_path) as file :
+        for line in file :
+            id_sent = line.strip().split('\t')
+            description.append( ''.join(id_sent[-1:]) ) #list to str
+            videoID.append( id_sent[0] )
+            video_path.append( os.path.join( video_feat_path, id_sent[0]+'.avi.npy' ) )    
+                        
+    video_data = DataFrame({'VideoID':videoID, 'Description':description, 'video_path':video_path})
+    
+    return video_data
+
+
 def preProBuildWordVocab(sentence_iterator, word_count_threshold=5): # borrowed this function from NeuralTalk
     print 'preprocessing word counts and creating vocab based on word count threshold %d' % (word_count_threshold, )
     word_counts = {}
@@ -197,22 +216,22 @@ def preProBuildWordVocab(sentence_iterator, word_count_threshold=5): # borrowed 
     bias_init_vector -= np.max(bias_init_vector) # shift to nice numeric range
     return wordtoix, ixtoword, bias_init_vector
 
-def train( restore=False, restore_model='' ):
+def fine_tune( pre_trained_model, restore=False, restore_model='' ):
     # data w/o split
     #train_data, _ = get_video_data(video_data_path, video_feat_path, train_ratio=0.9)
     #print(train_data)
     #print(type(train_data))
-    
+        
     loss_vector = []
     pre_epochs = 0
-    train_data = MSRVTT_get_video_data( train_val_sents_gt_path, train_val_video_feat_path, True )
+    train_data = MSVD_get_video_data( ft_train_sents_gt_path, ft_train_video_feat_path )
 
-    captions = train_data['Description'].values
+    msrvtt_vocab_data = MSRVTT_get_video_data( train_val_sents_gt_path, train_val_video_feat_path, True )
+    captions = msrvtt_vocab_data['Description'].values
     captions = map(lambda x: x.replace('.', ''), captions)
     captions = map(lambda x: x.replace(',', ''), captions)    
     wordtoix, ixtoword, bias_init_vector = preProBuildWordVocab(captions, word_count_threshold=10)
-    np.save('./data/MSRVTT_ot/ixtoword', ixtoword)
-
+ 
     model = Video_Caption_Generator(
             dim_image=dim_image,
             n_words=len(wordtoix),
@@ -232,15 +251,15 @@ def train( restore=False, restore_model='' ):
         tf.initialize_all_variables().run() 
         saver = tf.train.Saver()
         saver.restore(sess, restore_model)
-        global model_path
-        model_path = os.path.dirname(restore_model)
-        
     else:
-        train_op = tf.train.AdamOptimizer(learning_rate).minimize(tf_loss)
-        tf.initialize_all_variables().run() 
-        saver = tf.train.Saver(max_to_keep=10)
+        saver = tf.train.Saver()
+        saver.restore(sess, pre_trained_model)
 
-  
+        temp = set(tf.all_variables())
+        train_op = tf.train.AdamOptimizer(learning_rate).minimize(tf_loss)
+        sess.run(tf.initialize_variables(set(tf.all_variables()) - temp))
+        saver = tf.train.Saver() #save new optimizer variables
+
     for epoch in range(n_epochs+1):
         if restore == True:
             epoch = epoch + pre_epochs
@@ -306,4 +325,4 @@ def train( restore=False, restore_model='' ):
                 saver.save(sess, os.path.join(model_path, 'model'), global_step=epoch)
                 np.save( os.path.join(model_path, 'loss-'+str(epoch)),loss_vector )
 
-train(True, 'MSRVTT_models5/model-400')
+fine_tune( 'MSRVTT_models3/model-800')
